@@ -15,34 +15,86 @@
     html, body {
       height: 100%;
       margin: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
     header {
       padding: 10px 15px;
       box-shadow: 0 1px 4px rgba(0,0,0,0.1);
       z-index: 1000;
       background: #ffffff;
     }
+
     header h1 {
       margin: 0 0 4px 0;
       font-size: 1.3rem;
     }
+
     header p {
       margin: 2px 0;
       font-size: 0.95rem;
     }
+
     .counter {
       font-weight: 600;
     }
+
+    .controls {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      border: none;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      background: #457b9d;
+      color: #fff;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
     #map {
-      height: calc(100% - 90px);
+      flex: 1 1 auto;
       width: 100%;
     }
+
     footer {
       padding: 4px 10px;
       font-size: 0.75rem;
       background: #f5f5f5;
       border-top: 1px solid #ddd;
+    }
+
+    footer a {
+      color: inherit;
+    }
+
+    /* Mobile adjustments */
+    @media (max-width: 600px) {
+      header h1 {
+        font-size: 1.1rem;
+      }
+      header p {
+        font-size: 0.85rem;
+      }
+      button {
+        flex: 1 1 auto;
+        text-align: center;
+      }
     }
   </style>
 </head>
@@ -57,9 +109,15 @@
       </span>
       out of
       <span class="counter" id="total-count">0</span>
-      in total.
+      in total
+      (<span id="percent-visited">0%</span> explored).
     </p>
     <p>Click on a region to mark / unmark it as “visited”.</p>
+
+    <div class="controls">
+      <button id="reset-btn">Reset all regions</button>
+      <button id="export-btn">Download map as PNG</button>
+    </div>
   </header>
 
   <div id="map"></div>
@@ -69,10 +127,7 @@
     <a href="https://simplemaps.com/resources/free-country-gis-maps" target="_blank" rel="noopener noreferrer">
       SimpleMaps
     </a>
-    for ex-Yugoslav countries, and Kosovo ADM1 from geoBoundaries via
-    <a href="https://mapscaping.com/country-boundary-viewer/" target="_blank" rel="noopener noreferrer">
-      Country Boundary Viewer
-    </a>.
+    for ex-Yugoslav countries, and Kosovo ADM1 from geoBoundaries / GADM.
     Base map tiles: &copy;
     <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener noreferrer">
       OpenStreetMap
@@ -82,6 +137,8 @@
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- html2canvas for PNG export -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
   <script>
     // Local storage key for visited regions in former Yugoslavia
@@ -91,10 +148,19 @@
     let total = 0;
     const visitedCountEl = document.getElementById('visited-count');
     const totalCountEl   = document.getElementById('total-count');
+    const percentEl      = document.getElementById('percent-visited');
+    const resetBtn       = document.getElementById('reset-btn');
+    const exportBtn      = document.getElementById('export-btn');
 
     function updateCounter() {
       visitedCountEl.textContent = visited.size;
       totalCountEl.textContent   = total;
+      if (total > 0) {
+        const percent = (visited.size / total * 100).toFixed(1);
+        percentEl.textContent = percent + '%';
+      } else {
+        percentEl.textContent = '0%';
+      }
     }
 
     // List of all regional GeoJSON files for former Yugoslavia
@@ -139,10 +205,13 @@
     const map = L.map('map').setView([44.5, 18.5], 6);
 
     // OpenStreetMap background tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const baseLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 12,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
+
+    // To keep a reference to all region layers for reset
+    const regionLayers = [];
 
     // Style for visited / not visited regions
     function style(feature, country) {
@@ -193,13 +262,14 @@
         .then(data => {
           // Increase total number of regions
           total += data.features.length;
-          totalCountEl.textContent = total;
 
           // Add regions to the map
           const layer = L.geoJSON(data, {
             style: f => style(f, cfg.country),
             onEachFeature: (f, l) => onEachFeature(f, l, cfg.country)
           }).addTo(map);
+
+          regionLayers.push({ layer, country: cfg.country });
 
           // Extend global bounds
           const bounds = layer.getBounds();
@@ -221,6 +291,59 @@
         .catch(err => {
           console.error('Error loading', cfg.file, err);
         });
+    });
+
+    // Reset all regions
+    resetBtn.addEventListener('click', () => {
+      visited = new Set();
+      localStorage.setItem(visitedKey, JSON.stringify([]));
+
+      // Reset style on all regions
+      regionLayers.forEach(rl => {
+        rl.layer.eachLayer(l => {
+          l.setStyle(style(l.feature, rl.country));
+        });
+      });
+
+      updateCounter();
+    });
+
+    // Export map as PNG (without the base OSM tiles, to avoid CORS issues)
+    exportBtn.addEventListener('click', () => {
+      if (typeof html2canvas === 'undefined') {
+        alert('Export is not available right now.');
+        return;
+      }
+
+      resetBtn.disabled = true;
+      exportBtn.disabled = true;
+
+      // Temporarily remove the base map (OSM tiles) to avoid cross-origin issues
+      map.removeLayer(baseLayer);
+
+      const mapElement = document.getElementById('map');
+
+      html2canvas(mapElement, {
+        backgroundColor: '#ffffff'
+      }).then(canvas => {
+        // Restore the base map
+        map.addLayer(baseLayer);
+
+        // Create a download link
+        const link = document.createElement('a');
+        link.download = 'ex-yugoslavia-trips.png';
+        link.href = canvas.toDataURL('image/png');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }).catch(err => {
+        console.error('Error exporting map as PNG:', err);
+        alert('Sorry, something went wrong while exporting the map.');
+        map.addLayer(baseLayer);
+      }).finally(() => {
+        resetBtn.disabled = false;
+        exportBtn.disabled = false;
+      });
     });
   </script>
 </body>
