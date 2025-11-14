@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Mes visites de la Serbie</title>
+  <title>My trips across former Yugoslavia</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Feuilles de style Leaflet -->
+  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -49,30 +49,39 @@
 <body>
 
   <header>
-    <h1>Mes visites de la Serbie !</h1>
+    <h1>My trips across former Yugoslavia</h1>
     <p>
+      I have slept in
       <span class="counter">
-        <span id="visited-count">0</span> districts
+        <span id="visited-count">0</span> countries
       </span>
-      dans lesquels j'ai déjà dormi, sur
-      <span class="counter" id="total-count">0</span> au total.
+      out of
+      <span class="counter" id="total-count">0</span>
+      in the region.
     </p>
-    <p>Clique sur un district pour le marquer / le dé-marquer comme “visité”.</p>
+    <p>Click on a country to mark / unmark it as “visited”.</p>
   </header>
 
   <div id="map"></div>
 
   <footer>
-    Données frontières : <a href="https://simplemaps.com/gis/country/rs" target="_blank" rel="noopener noreferrer">SimpleMaps</a> (CC BY 4.0).
-    Tuiles de fond : © contributeurs <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>.
+    Borders: data from Natural Earth via
+    <a href="https://geojson-maps.kyd.au" target="_blank" rel="noopener noreferrer">
+      geojson-maps.kyd.au
+    </a>.
+    Base map tiles: &copy;
+    <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener noreferrer">
+      OpenStreetMap
+    </a>
+    contributors.
   </footer>
 
-  <!-- Script Leaflet -->
+  <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    // Clé de stockage local pour garder en mémoire tes districts visités
-    const visitedKey = 'visitedDistrictsRS';
+    // Local storage key for visited countries in former Yugoslavia
+    const visitedKey = 'visitedExYuCountries';
     let visited = new Set(JSON.parse(localStorage.getItem(visitedKey) || '[]'));
 
     let total = 0;
@@ -84,32 +93,56 @@
       totalCountEl.textContent   = total;
     }
 
-    // Création de la carte centrée sur la Serbie
-    const map = L.map('map').setView([44.0, 21.0], 7);
+    // Helper: get a stable ID for each feature (country)
+    function getFeatureId(feature) {
+      const p = feature.properties || {};
+      return (
+        p.adm0_a3 ||
+        p.ISO_A3 ||
+        p.iso_a3 ||
+        p.postal ||
+        p.name ||
+        p.ADMIN
+      );
+    }
 
-    // Fond de carte OpenStreetMap
+    // Helper: get the display name
+    function getFeatureName(feature) {
+      const p = feature.properties || {};
+      return (
+        p.name ||
+        p.ADMIN ||
+        p.formal_en ||
+        'Country'
+      );
+    }
+
+    // Create map centered on the ex-Yugoslavia region
+    const map = L.map('map').setView([44.5, 18.5], 6);
+
+    // OpenStreetMap background tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 12,
-      attribution: '&copy; contributeurs OpenStreetMap'
+      attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // Style des districts (couleur différente si visités ou non)
+    // Style for visited / not visited countries
     function style(feature) {
-      const id = feature.properties.id;
+      const id = getFeatureId(feature);
       const isVisited = visited.has(id);
 
       return {
         color: '#222',
         weight: 1,
-        fillOpacity: isVisited ? 0.8 : 0.2,
+        fillOpacity: isVisited ? 0.8 : 0.25,
         fillColor: isVisited ? '#e63946' : '#457b9d'
       };
     }
 
-    // Gestion des clics sur chaque district
+    // Behaviour on each country polygon
     function onEachFeature(feature, layer) {
-      const id   = feature.properties.id   || feature.properties.code || feature.properties.NAME_1;
-      const name = feature.properties.name || feature.properties.NAME_1 || 'District';
+      const id   = getFeatureId(feature);
+      const name = getFeatureName(feature);
 
       if (!id) return;
 
@@ -127,23 +160,26 @@
       });
     }
 
-    // Chargement du fichier GeoJSON (districts serbes)
-    fetch('serbia_admin.geojson')
+    // Load ex-Yugoslavia countries GeoJSON
+    fetch('ex-yugoslavia.geojson')
       .then(response => response.json())
       .then(data => {
         total = data.features.length;
         totalCountEl.textContent = total;
 
-        L.geoJSON(data, {
+        const layer = L.geoJSON(data, {
           style: style,
           onEachFeature: onEachFeature
         }).addTo(map);
 
+        // Fit the map to the region
+        map.fitBounds(layer.getBounds());
+
         updateCounter();
       })
       .catch(err => {
-        console.error('Erreur de chargement du GeoJSON', err);
-        alert('Impossible de charger le fichier serbia_admin.geojson. Vérifie qu’il est bien dans le même dépôt et au même niveau que index.html.');
+        console.error('Error loading ex-yugoslavia.geojson', err);
+        alert('Could not load ex-yugoslavia.geojson. Make sure the file is in the same repository and at the same level as index.html.');
       });
   </script>
 </body>
